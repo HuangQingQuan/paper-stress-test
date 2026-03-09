@@ -1,463 +1,267 @@
 """
-app.py — Streamlit 主界面
-运行方式：streamlit run app.py
+app.py — Streamlit 审稿助手主界面
+运行：streamlit run app.py
 """
 
 import streamlit as st
-from engine import PaperEngine
-from ai_advisor import get_ai_questions, AI_SUPPORTED_IDS
+from paper_reader import PaperReader
+from reviewer import ReviewSession, QUICK_PROMPTS
 
 # ──────────────────────────────────────────────
 # 页面配置
 # ──────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="论文压力测试",
-    page_icon="🔬",
+    page_title="论文审稿助手",
+    page_icon="📄",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 st.markdown("""
 <style>
 @import url('https://fonts.loli.net/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'Noto Serif SC', serif;
-}
+html, body, [class*="css"] { font-family: 'Noto Serif SC', serif; }
+#MainMenu, footer { visibility: hidden; }
+.block-container { padding-top: 1.5rem; padding-bottom: 3rem; }
 
-/* 隐藏默认streamlit元素 */
-#MainMenu, footer, header { visibility: hidden; }
-.block-container { padding-top: 2rem; padding-bottom: 4rem; max-width: 960px; }
-
-/* 顶部标题区 */
-.pst-header {
+/* 顶部 */
+.app-header {
     border-top: 3px solid #1a1a1a;
-    border-bottom: 1px solid #ddd;
-    padding: 1.5rem 0 1.2rem;
-    margin-bottom: 2rem;
+    padding: 1rem 0 0.8rem;
+    margin-bottom: 1.5rem;
 }
-.pst-header h1 {
-    font-size: 1.5rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    margin: 0 0 0.3rem 0;
-    color: #1a1a1a;
+.app-header h1 {
+    font-size: 1.3rem; font-weight: 700;
+    letter-spacing: 0.04em; margin: 0 0 0.25rem;
 }
-.pst-header p {
-    font-size: 0.82rem;
-    color: #888;
-    font-family: 'JetBrains Mono', monospace;
-    margin: 0;
+.app-header p {
+    font-size: 0.75rem; color: #999;
+    font-family: 'JetBrains Mono', monospace; margin: 0;
 }
 
-/* 得分卡 */
-.score-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-    margin-bottom: 2rem;
+/* 聊天消息 */
+.msg-user {
+    background: #f7f4ef;
+    border-left: 3px solid #1a1a1a;
+    padding: 0.9rem 1.1rem;
+    margin: 0.8rem 0;
+    font-size: 0.92rem;
+    line-height: 1.75;
 }
-.score-card {
+.msg-ai {
     background: white;
-    border: 1px solid #e5e5e5;
+    border: 1px solid #e8e4de;
     padding: 1rem 1.2rem;
+    margin: 0.8rem 0;
+    font-size: 0.92rem;
+    line-height: 1.8;
 }
-.score-card .sc-label {
+.msg-label {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.68rem;
+    font-size: 0.65rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: #999;
-    margin-bottom: 0.3rem;
-}
-.score-card .sc-num {
-    font-size: 2.2rem;
-    font-weight: 700;
-    line-height: 1;
-    color: #1a1a1a;
-}
-.score-card .sc-num.bad  { color: #c0392b; }
-.score-card .sc-num.warn { color: #d35400; }
-.score-card .sc-num.good { color: #27ae60; }
-.score-card .sc-denom { font-size: 1.1rem; color: #ccc; font-weight: 400; }
-.score-card .sc-sub {
-    font-size: 0.75rem;
     color: #bbb;
-    margin-top: 0.2rem;
-    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 0.4rem;
 }
 
-/* Section heading */
-.sec-title {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: #999;
-    border-bottom: 1px solid #e5e5e5;
-    padding-bottom: 0.5rem;
-    margin: 2.5rem 0 1.2rem;
-}
-
-/* 结构检查行 */
-.struct-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 0.7rem 0;
-    border-bottom: 1px solid #f0ede8;
-    font-size: 0.9rem;
-}
-.struct-row:last-child { border-bottom: none; }
-.cat-tag {
+/* 快捷按钮 */
+.quick-label {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #aaa;
+    margin: 1.2rem 0 0.5rem;
+}
+
+/* 论文信息卡 */
+.paper-card {
     background: #f0ede8;
-    color: #888;
-    padding: 2px 7px;
-    white-space: nowrap;
-    margin-top: 2px;
-}
-.struct-name { flex: 1; color: #333; }
-.ok-dot  { color: #27ae60; font-size: 1.1rem; }
-.err-dot { color: #c0392b; font-size: 1.1rem; }
-.evidence-text {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
-    color: #aaa;
-    margin-top: 3px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 500px;
-}
-
-/* 方法追问卡 */
-.mcard {
-    border-left: 4px solid #e5e5e5;
-    background: #fafafa;
-    padding: 1rem 1.2rem;
-    margin-bottom: 1rem;
-}
-.mcard.high   { border-left-color: #c0392b; background: #fdf2f0; }
-.mcard.medium { border-left-color: #d35400; background: #fdf6ef; }
-.mcard.passed { border-left-color: #27ae60; background: #f0faf4; }
-
-.mcard-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 0.5rem;
-}
-.mcard-title { font-weight: 700; font-size: 0.95rem; color: #1a1a1a; }
-.risk-chip {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.62rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    padding: 2px 8px;
-    color: white;
-}
-.risk-chip.high   { background: #c0392b; }
-.risk-chip.medium { background: #d35400; }
-.risk-chip.passed { background: #27ae60; }
-
-.block-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: #aaa;
-    margin: 0.8rem 0 0.3rem;
-}
-.why-text  { font-size: 0.85rem; color: #555; line-height: 1.7; }
-.how-item  {
-    font-size: 0.83rem;
-    color: #444;
-    padding: 0.35rem 0 0.35rem 1.2rem;
-    border-bottom: 1px dashed #e8e4de;
-    position: relative;
-    line-height: 1.6;
-}
-.how-item:last-child { border-bottom: none; }
-.how-item::before {
-    content: "→";
-    position: absolute;
-    left: 0;
-    color: #ccc;
-    font-family: 'JetBrains Mono', monospace;
-}
-
-/* AI追问区块 */
-.ai-questions {
-    background: white;
-    border: 1px solid #e0dbd2;
     padding: 0.8rem 1rem;
-    margin-top: 0.6rem;
-}
-.ai-q-item {
-    font-size: 0.85rem;
-    color: #2c3e50;
-    padding: 0.4rem 0;
-    border-bottom: 1px solid #f0ede8;
-    padding-left: 1.2rem;
-    position: relative;
-}
-.ai-q-item:last-child { border-bottom: none; }
-.ai-q-item::before {
-    content: "？";
-    position: absolute;
-    left: 0;
-    color: #c0392b;
-    font-weight: 700;
     font-size: 0.8rem;
-}
-
-/* 方法标签 */
-.method-badge {
-    display: inline-block;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.68rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    background: #1a1a1a;
-    color: white;
-    padding: 3px 10px;
+    color: #666;
     margin-bottom: 1rem;
+    border-left: 3px solid #1a1a1a;
+}
+.paper-card strong { color: #1a1a1a; }
+
+/* 侧栏 */
+section[data-testid="stSidebar"] > div:first-child {
+    padding: 1.5rem 1rem;
+    background: #fafaf8;
 }
 
-/* 上传区域美化 */
-.upload-hint {
-    text-align: center;
-    padding: 3rem 2rem;
-    border: 2px dashed #ddd;
-    color: #aaa;
-    font-size: 0.9rem;
-}
+/* 输入框底部 */
+.stChatInput { border-top: 1px solid #e5e5e5; padding-top: 0.5rem; }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────
-# 工具函数
+# Session State 初始化
 # ──────────────────────────────────────────────
 
-def score_color(bad, total):
-    if total == 0: return "good"
-    r = bad / total
-    if r == 0: return "good"
-    if r <= 0.33: return "warn"
-    return "bad"
+def init_state():
+    defaults = {
+        "session":       None,    # ReviewSession
+        "chat_history":  [],      # [{role, content}]
+        "paper_stats":   None,
+        "paper_name":    "",
+        "paper_loaded":  False,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
-
-def render_score_row(struct, did_results, iv_results):
-    s_bad = sum(1 for r in struct if not r["passed"])
-    s_ok  = len(struct) - s_bad
-    m_all = did_results + iv_results
-    m_bad = sum(1 for r in m_all if not r["passed"])
-    m_ok  = len(m_all) - m_bad
-
-    sc = score_color(s_bad, len(struct))
-    mc = score_color(m_bad, len(m_all)) if m_all else "good"
-
-    method_html = f"""
-    <div class="score-card">
-        <div class="sc-label">方法通过</div>
-        <div class="sc-num {mc}">{m_ok}<span class="sc-denom">/{len(m_all)}</span></div>
-        <div class="sc-sub">项已覆盖</div>
-    </div>
-    <div class="score-card">
-        <div class="sc-label">方法风险</div>
-        <div class="sc-num {'bad' if m_bad > 0 else 'good'}">{m_bad}<span class="sc-denom">/{len(m_all)}</span></div>
-        <div class="sc-sub">项需关注</div>
-    </div>
-    """ if m_all else ""
-
-    html = f"""
-    <div class="score-grid">
-        <div class="score-card">
-            <div class="sc-label">结构通过</div>
-            <div class="sc-num {sc}">{s_ok}<span class="sc-denom">/{len(struct)}</span></div>
-            <div class="sc-sub">项已检测到</div>
-        </div>
-        <div class="score-card">
-            <div class="sc-label">结构缺失</div>
-            <div class="sc-num {'bad' if s_bad > 0 else 'good'}">{s_bad}<span class="sc-denom">/{len(struct)}</span></div>
-            <div class="sc-sub">项建议补充</div>
-        </div>
-        {method_html}
-    </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
-
-
-def render_structure(struct):
-    st.markdown('<div class="sec-title">第一层 · 结构完整性检查</div>', unsafe_allow_html=True)
-    rows_html = ""
-    for r in struct:
-        dot = '<span class="ok-dot">✓</span>' if r["passed"] else '<span class="err-dot">✗</span>'
-        ev = ""
-        if r["passed"] and r["evidence"]:
-            ev = f'<div class="evidence-text">{r["evidence"][:80]}</div>'
-        elif not r["passed"]:
-            ev = f'<div style="font-size:0.75rem;color:#c0392b;margin-top:3px;">{r["evidence"]}</div>'
-        rows_html += f"""
-        <div class="struct-row">
-            <span class="cat-tag">{r['category']}</span>
-            <div class="struct-name">{r['name']}{ev}</div>
-            {dot}
-        </div>"""
-    st.markdown(rows_html, unsafe_allow_html=True)
-
-
-def render_method_cards(cards: list[dict], method_key: str, excerpt: str):
-    """渲染一组方法追问卡，支持展开修复路径和AI逻辑追问"""
-    for card in cards:
-        cid = card["id"]
-        passed = card["passed"]
-        risk = card["risk"] if not passed else "passed"
-        risk_label = {"high": "高风险", "medium": "中风险", "passed": "通过"}.get(risk, risk)
-
-        card_class = risk if not passed else "passed"
-
-        card_html = f"""
-        <div class="mcard {card_class}">
-            <div class="mcard-head">
-                <span class="mcard-title">{card['title']}</span>
-                <span class="risk-chip {card_class}">{risk_label}</span>
-            </div>
-        """
-        if passed:
-            card_html += '<div style="font-size:0.82rem;color:#27ae60;">✓ 已在文中检测到相关内容</div>'
-        else:
-            card_html += f'<div style="font-size:0.85rem;color:#c0392b;margin-bottom:0.5rem;">{card["question"]}</div>'
-        card_html += "</div>"
-        st.markdown(card_html, unsafe_allow_html=True)
-
-        if not passed:
-            col1, col2 = st.columns([1, 1])
-
-            # 修复路径
-            with col1:
-                fix_key = f"fix_{method_key}_{cid}"
-                if st.button("📋 查看修复路径", key=fix_key, use_container_width=True):
-                    st.session_state[f"show_fix_{cid}"] = not st.session_state.get(f"show_fix_{cid}", False)
-
-            # AI追问（仅支持的项显示）
-            with col2:
-                if cid in AI_SUPPORTED_IDS:
-                    ai_key = f"ai_{method_key}_{cid}"
-                    if st.button("🤖 AI逻辑追问", key=ai_key, use_container_width=True):
-                        st.session_state[f"show_ai_{cid}"] = True
-                        if f"ai_q_{cid}" not in st.session_state:
-                            with st.spinner("正在生成针对本文的追问..."):
-                                qs = get_ai_questions(cid, excerpt)
-                                st.session_state[f"ai_q_{cid}"] = qs
-
-            # 展示修复路径
-            if st.session_state.get(f"show_fix_{cid}", False):
-                items_html = "".join(f'<div class="how-item">{h}</div>' for h in card["how"])
-                st.markdown(f"""
-                <div style="margin:-0.3rem 0 0.8rem;padding:0.8rem 1rem;background:white;border:1px solid #e0dbd2;">
-                    <div class="block-label">为何重要</div>
-                    <div class="why-text">{card['why']}</div>
-                    <div class="block-label">修复路径</div>
-                    {items_html}
-                </div>""", unsafe_allow_html=True)
-
-            # 展示AI追问
-            if st.session_state.get(f"show_ai_{cid}", False):
-                qs = st.session_state.get(f"ai_q_{cid}", [])
-                if qs:
-                    items_html = "".join(f'<div class="ai-q-item">{q}</div>' for q in qs)
-                    st.markdown(f"""
-                    <div class="ai-questions">
-                        <div class="block-label" style="margin-top:0;">审稿人可能针对本文追问</div>
-                        {items_html}
-                    </div>""", unsafe_allow_html=True)
+init_state()
 
 
 # ──────────────────────────────────────────────
-# 主界面
+# 侧栏：论文上传 + 快捷追问
 # ──────────────────────────────────────────────
 
-def main():
-    # 标题
+with st.sidebar:
     st.markdown("""
-    <div class="pst-header">
-        <h1>论文压力测试 · Paper Stress Test</h1>
-        <p>投稿前系统扫描 · 中文经管顶刊审稿人视角 · 覆盖结构 / DID / IV</p>
+    <div style="border-top:3px solid #1a1a1a;padding-top:1rem;margin-bottom:1.2rem;">
+        <div style="font-size:1.1rem;font-weight:700;">📄 论文审稿助手</div>
+        <div style="font-size:0.72rem;color:#999;font-family:'JetBrains Mono',monospace;margin-top:4px;">
+            顶刊审稿人视角 · 深度分析 · 改写建议
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # 上传
-    uploaded = st.file_uploader(
-        "上传论文 PDF",
-        type=["pdf"],
-        label_visibility="collapsed",
-    )
+    uploaded = st.file_uploader("上传论文 PDF", type=["pdf"], label_visibility="collapsed")
 
-    if uploaded is None:
-        st.markdown("""
-        <div class="upload-hint">
-            将 PDF 拖拽至上方，或点击上传<br>
-            <span style="font-size:0.75rem;">支持中英文论文 · 检测结果不会上传或储存</span>
-        </div>
-        """, unsafe_allow_html=True)
-        return
+    if uploaded:
+        file_key = f"{uploaded.name}_{uploaded.size}"
+        if st.session_state.get("_last_file") != file_key:
+            with st.spinner("正在解析论文..."):
+                reader = PaperReader(uploaded.read())
+                context = reader.get_context_for_review()
+                stats   = reader.summary_stats()
+                session = ReviewSession(context)
 
-    # 检测
-    cache_key = f"result_{uploaded.name}_{uploaded.size}"
-    if cache_key not in st.session_state:
-        with st.spinner(f"正在分析 {uploaded.name} ..."):
-            engine = PaperEngine()
-            result = engine.analyze(uploaded.read())
-            st.session_state[cache_key] = result
-            st.session_state["excerpt"] = result["intro_excerpt"]
+            st.session_state["session"]      = session
+            st.session_state["paper_stats"]  = stats
+            st.session_state["paper_name"]   = uploaded.name
+            st.session_state["paper_loaded"] = True
+            st.session_state["chat_history"] = []
+            st.session_state["_last_file"]   = file_key
+            st.rerun()
 
-    result = st.session_state[cache_key]
-    excerpt = st.session_state.get("excerpt", "")
-
-    struct      = result["structure"]
-    did_type    = result["did_type"]
-    did_results = result["did_results"]
-    iv_results  = result["iv_results"]
-
-    # 总分
-    render_score_row(struct, did_results, iv_results)
-
-    # 结构层
-    render_structure(struct)
-
-    # DID层
-    if did_type:
-        label = "DID · 主识别策略（完整追问）" if did_type == "main" else "DID · 稳健性检验（精简追问）"
-        st.markdown(f'<div class="sec-title">第二层A · DID方法专项追问</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="method-badge">{label}</div>', unsafe_allow_html=True)
-        render_method_cards(did_results, "did", excerpt)
-
-    # IV层
-    if result["has_iv"]:
-        st.markdown('<div class="sec-title">第二层B · 工具变量（IV）专项追问</div>', unsafe_allow_html=True)
-        st.markdown('<div class="method-badge">IV · 工具变量 · 2SLS</div>', unsafe_allow_html=True)
-        render_method_cards(iv_results, "iv", excerpt)
-
-    if not did_type and not result["has_iv"]:
-        st.markdown("""
-        <div style="color:#aaa;font-size:0.85rem;padding:1rem 0;font-family:'JetBrains Mono',monospace;">
-        未检测到 DID 或 IV 方法 · RDD模块开发中
+    # 论文信息
+    if st.session_state["paper_loaded"]:
+        stats = st.session_state["paper_stats"]
+        secs  = "、".join(stats.get("sections", [])) or "—"
+        st.markdown(f"""
+        <div class="paper-card">
+            <strong>{st.session_state['paper_name']}</strong><br>
+            {stats['pages']} 页 · {stats['chars']:,} 字符<br>
+            识别章节：{secs}
         </div>
         """, unsafe_allow_html=True)
 
-    # 页脚
+        # 快捷追问
+        st.markdown('<div class="quick-label">快捷追问</div>', unsafe_allow_html=True)
+        for qp in QUICK_PROMPTS:
+            if st.button(qp["label"], key=f"qp_{qp['label']}", use_container_width=True,
+                         help=qp["desc"]):
+                st.session_state["_pending_prompt"] = qp["prompt"]
+                st.rerun()
+
+        st.divider()
+        if st.button("🗑️ 清空对话记录", use_container_width=True):
+            st.session_state["chat_history"] = []
+            st.session_state["session"].clear_history()
+            st.rerun()
+
+    else:
+        st.markdown("""
+        <div style="color:#bbb;font-size:0.82rem;padding:1rem 0;line-height:1.8;">
+            上传 PDF 后，你可以：<br>
+            · 请AI做完整深度初审<br>
+            · 追问某个具体问题<br>
+            · 要求改写某段文字<br>
+            · 询问适合投哪本期刊
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# ──────────────────────────────────────────────
+# 主区域：对话界面
+# ──────────────────────────────────────────────
+
+st.markdown("""
+<div class="app-header">
+    <h1>论文审稿助手</h1>
+    <p>上传论文 · 深度审稿 · 追问改写 · 直到满意</p>
+</div>
+""", unsafe_allow_html=True)
+
+if not st.session_state["paper_loaded"]:
     st.markdown("""
-    <div style="margin-top:4rem;padding-top:1rem;border-top:1px solid #e5e5e5;
-                font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:#ccc;">
-        Paper Stress Test · 覆盖方法：DID · IV · RDD（开发中）
+    <div style="text-align:center;padding:5rem 2rem;color:#ccc;border:2px dashed #e5e5e5;">
+        <div style="font-size:2rem;margin-bottom:1rem;">📄</div>
+        <div style="font-size:1rem;color:#aaa;">在左侧上传论文 PDF 开始审稿</div>
+        <div style="font-size:0.8rem;margin-top:0.5rem;">支持中英文 · 文件不会被保存</div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
+
+# 渲染历史对话
+for msg in st.session_state["chat_history"]:
+    if msg["role"] == "user":
+        st.markdown(f"""
+        <div class="msg-user">
+            <div class="msg-label">你</div>
+            {msg["content"].replace(chr(10), "<br>")}
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div class="msg-ai">
+            <div class="msg-label">审稿人</div>
+        """, unsafe_allow_html=True)
+        st.markdown(msg["content"])
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# 处理待发送的消息（来自快捷按钮或输入框）
+pending = st.session_state.pop("_pending_prompt", None)
+user_input = st.chat_input("向审稿人提问，或要求改写某段文字…")
+prompt = pending or user_input
+
+if prompt:
+    session: ReviewSession = st.session_state["session"]
+
+    # 显示用户消息
+    st.markdown(f"""
+    <div class="msg-user">
+        <div class="msg-label">你</div>
+        {prompt.replace(chr(10), "<br>")}
     </div>
     """, unsafe_allow_html=True)
 
+    # 流式输出AI回复
+    st.markdown("""
+    <div class="msg-ai">
+        <div class="msg-label">审稿人</div>
+    """, unsafe_allow_html=True)
 
-if __name__ == "__main__":
-    main()
+    response_container = st.empty()
+    full_response = ""
+
+    for delta in session.chat(prompt):
+        full_response += delta
+        response_container.markdown(full_response + "▌")
+
+    response_container.markdown(full_response)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # 存入历史
+    st.session_state["chat_history"].append({"role": "user",    "content": prompt})
+    st.session_state["chat_history"].append({"role": "assistant","content": full_response})
+    st.rerun()
