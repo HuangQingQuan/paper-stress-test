@@ -425,12 +425,18 @@ with tab2:
             results_store = []
             log("开始执行 Baseline 回归...")
 
-            regressors = [v for v in (indeps + controls) if v in df.columns and v != dep]
-            y_col = dep if dep in df.columns else (available[0] if available else None)
+            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            regressors = [v for v in (indeps + controls) if v in numeric_cols and v != dep]
+            y_col = dep if dep in numeric_cols else None
+
+            skipped = [v for v in (indeps + controls + [dep]) if v in df.columns and v not in numeric_cols]
+            if skipped:
+                st.warning(f"⚠ 以下变量为非数值类型，已自动跳过（如需使用请先做哑变量编码）：{skipped}")
+                log(f"非数值变量跳过：{skipped}", "WARN")
 
             if not y_col or not regressors:
-                st.error("因变量或自变量在数据集中不存在，无法执行回归。")
-                log("回归失败：变量不存在", "ERROR")
+                st.error("因变量或自变量在数据集中不存在或均为非数值类型，无法执行回归。")
+                log("回归失败：无有效数值变量", "ERROR")
             else:
                 df_clean = df[[y_col] + regressors].dropna()
                 log(f"清洗后样本量：{len(df_clean)} 行（原始 {len(df)} 行）")
@@ -453,7 +459,7 @@ with tab2:
                 # 稳健性：减少控制变量
                 if "增减控制变量" in spec.get("robustness_checks", []) and controls:
                     try:
-                        regressors_r = [v for v in indeps if v in df.columns]
+                        regressors_r = [v for v in indeps if v in numeric_cols]
                         if regressors_r:
                             X_r = sm.add_constant(df_clean[regressors_r])
                             model_r = sm.OLS(y, X_r).fit(cov_type='HC3')
