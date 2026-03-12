@@ -614,14 +614,14 @@ with tab3:
         anom_df = pd.DataFrame(st.session_state.anomalies)
 
         risk_color = {"高": "🔴", "中": "🟡", "低": "🟢"}
-        for _, row in anom_df.iterrows():
+        for i, row in anom_df.iterrows():
             icon = risk_color.get(row["风险等级"], "⚪")
             with st.expander(f"{icon} [{row['风险等级']}] {row['类型']} · {row['规格']} · {row['变量']}"):
                 st.markdown(f"**详情**：{row['详情']}")
                 judge = st.radio(
                     "人类判断",
                     ["待确认", "数据质量问题（需回滚重新登记）", "真实经济学机制（可接受）", "需进一步调查"],
-                    key=f"judge_{row['类型']}_{row['变量']}_{row['规格']}",
+                    key=f"judge_{i}",
                 )
                 if judge != "待确认":
                     log(f"人类判断：{row['类型']} | {row['变量']} → {judge}")
