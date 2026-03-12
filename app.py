@@ -301,10 +301,12 @@ with tab1:
                     )
 
                 confirmed = st.checkbox("我已确认工具变量合理性 / 识别假设成立，同意锁定以上规格")
-                lock_btn = st.form_submit_button("🔒 锁定规格列表（不可逆）", type="primary", disabled=not confirmed)
+                lock_btn = st.form_submit_button("🔒 锁定规格列表（不可逆）", type="primary")
 
                 if lock_btn:
-                    if not dep_var or not indep_vars:
+                    if not confirmed:
+                        st.error("请先勾选确认框")
+                    elif not dep_var or not indep_vars:
                         st.error("请至少填写因变量和自变量")
                     else:
                         st.session_state.spec_list = {
