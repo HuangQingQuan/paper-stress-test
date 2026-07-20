@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import html
-from dataclasses import dataclass
+import base64
+import json
+import os
 
 import streamlit as st
+from openai import OpenAI
 
 
 st.set_page_config(
@@ -15,13 +17,6 @@ st.set_page_config(
     layout="centered",
     initial_sidebar_state="collapsed",
 )
-
-
-@dataclass(frozen=True)
-class Suggestion:
-    action: str
-    reason: str
-    space: float
 
 
 ACTIONS = ["留下", "卖掉", "捐出", "丢弃"]
@@ -79,31 +74,89 @@ def reset() -> None:
     st.rerun()
 
 
-def mock_suggestion(filename: str, index: int) -> Suggestion:
-    """Stable prototype suggestion; replace with a vision model in production."""
-    digest = int(hashlib.sha256(filename.encode("utf-8")).hexdigest()[:8], 16)
-    choices = [
-        Suggestion("卖掉", "看起来仍有使用价值，如果长期闲置，可以先尝试转卖。", 0.04),
-        Suggestion("捐出", "状态似乎尚可，送给需要的人比继续积灰更合适。", 0.05),
-        Suggestion("留下", "可能仍有使用或情感价值，建议先确认最近一次使用时间。", 0.02),
-        Suggestion("丢弃", "如果已经损坏或过期，建议分类处理，别再占用空间。", 0.03),
-    ]
-    return choices[(digest + index) % len(choices)]
+def get_secret(name: str, default: str = "") -> str:
+    """Read deployment secrets first, then environment variables."""
+    try:
+        value = st.secrets.get(name, "")
+    except (FileNotFoundError, KeyError):
+        value = ""
+    return str(value or os.getenv(name, default)).strip()
+
+
+def parse_json_object(raw: str) -> dict:
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1]
+        cleaned = cleaned.rsplit("```", 1)[0].strip()
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("AI 未返回可解析的 JSON")
+    return json.loads(cleaned[start : end + 1])
+
+
+def analyze_one_image(uploaded) -> dict:
+    api_key = get_secret("SILICONFLOW_API_KEY")
+    if not api_key:
+        raise RuntimeError("尚未配置 SILICONFLOW_API_KEY")
+
+    mime = uploaded.type or "image/jpeg"
+    encoded = base64.b64encode(uploaded.getvalue()).decode("ascii")
+    client = OpenAI(api_key=api_key, base_url="https://api.siliconflow.cn/v1")
+    response = client.chat.completions.create(
+        model=get_secret("SILICONFLOW_MODEL", "Qwen/Qwen2.5-VL-72B-Instruct"),
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "你是克制、尊重用户决定权的家庭断舍离助手。你只能提供建议，不能替用户决定。"
+                    "识别照片中的主要物品，综合可用状态、闲置可能性、转售价值和捐赠价值提出建议。"
+                    "如果物品可能有情感价值，要在理由中提醒用户自行确认。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime};base64,{encoded}",
+                            "detail": "low",
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "请只返回一个 JSON 对象，不要 Markdown："
+                            '{"name":"具体物品名","suggestion":"留下|卖掉|捐出|丢弃",'
+                            '"reason":"不超过45个汉字的一句具体理由","space":0.03}。'
+                            "space 是不留下该物品大约可腾出的立方米数，范围 0.001 到 2。"
+                            "不要使用泛泛的固定话术；必须结合照片里看到的物品、状态或数量。"
+                        ),
+                    },
+                ],
+            },
+        ],
+        temperature=0.2,
+        max_tokens=300,
+    )
+    data = parse_json_object(response.choices[0].message.content or "")
+    action = str(data.get("suggestion", "")).strip()
+    if action not in ACTIONS:
+        raise ValueError(f"AI 返回了未知处理方式：{action or '空值'}")
+    try:
+        space = min(2.0, max(0.001, float(data.get("space", 0.03))))
+    except (TypeError, ValueError):
+        space = 0.03
+    return {
+        "name": str(data.get("name") or "未命名物品").strip()[:30],
+        "suggestion": action,
+        "reason": str(data.get("reason") or "请结合实际使用频率做最后决定。").strip()[:80],
+        "space": space,
+    }
 
 
 def analyze_uploads(files) -> None:
-    items = []
-    for index, uploaded in enumerate(files):
-        suggestion = mock_suggestion(uploaded.name, index)
-        clean_name = uploaded.name.rsplit(".", 1)[0].replace("_", " ").replace("-", " ")
-        items.append(
-            {
-                "name": clean_name or f"物品 {index + 1}",
-                "suggestion": suggestion.action,
-                "reason": suggestion.reason,
-                "space": suggestion.space,
-            }
-        )
+    items = [analyze_one_image(uploaded) for uploaded in files]
     st.session_state["items"] = items
     st.session_state["photos"] = files
     st.session_state["done"] = {i: False for i in range(len(items))}
@@ -195,13 +248,23 @@ elif page == "upload":
         cols = st.columns(min(len(files), 3))
         for index, uploaded in enumerate(files[:6]):
             cols[index % len(cols)].image(uploaded, use_container_width=True)
+    ai_ready = bool(get_secret("SILICONFLOW_API_KEY"))
+    if files and not ai_ready:
+        st.warning("AI 服务尚未配置。请在 Streamlit Cloud Secrets 中添加 SILICONFLOW_API_KEY。")
     if st.button("让 AI 帮我看看", type="primary", use_container_width=True, disabled=not files):
-        analyze_uploads(files)
+        if not ai_ready:
+            st.error("缺少硅基流动 API Key，暂时无法分析照片。你仍可使用下方示例体验流程。")
+        else:
+            try:
+                with st.spinner(f"AI 正在查看 {len(files)} 张照片…"):
+                    analyze_uploads(files)
+            except Exception as exc:
+                st.error(f"AI 分析失败：{exc}")
     if st.button("没有照片，使用示例", use_container_width=True):
         load_demo()
     if st.button("← 返回", use_container_width=True):
         go("home")
-    st.markdown('<div class="notice">原型说明：当前体验版用示例规则生成建议，正式版将接入视觉模型，并允许你随时修改决定。</div>', unsafe_allow_html=True)
+    st.markdown('<div class="notice">照片将发送给硅基流动视觉模型完成本次分析。AI 只提供建议，你可以在下一步修改每一件的决定。</div>', unsafe_allow_html=True)
 
 elif page == "review":
     items = st.session_state["items"]
