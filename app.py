@@ -52,6 +52,19 @@ def init_state() -> None:
         if key not in st.session_state:
             st.session_state[key] = value
 
+    # Streamlit Cloud may keep browser session state across a redeploy. Normalize
+    # stale values left by an earlier version so deep pages cannot crash.
+    if not isinstance(st.session_state.items, list):
+        st.session_state.items = []
+    if not isinstance(st.session_state.photos, list):
+        st.session_state.photos = []
+    if not isinstance(st.session_state.done, dict):
+        st.session_state.done = {}
+    if st.session_state.page not in {"home", "upload", "review", "tasks", "complete"}:
+        st.session_state.page = "home"
+    if st.session_state.page in {"review", "tasks", "complete"} and not st.session_state.items:
+        st.session_state.page = "home"
+
 
 def go(page: str) -> None:
     st.session_state.page = page
@@ -131,7 +144,12 @@ h1,h2,h3,p{color:var(--ink)}
 .success-ring{width:92px;height:92px;border-radius:50%;background:#dfece4;color:var(--green);display:flex;align-items:center;justify-content:center;font-size:42px;margin:2.5rem auto 1.4rem}
 .summary{text-align:center;background:var(--paper);border:1px solid var(--line);border-radius:22px;padding:24px;margin:1.5rem 0}.big-number{font-size:38px;font-weight:700}.summary-grid{display:grid;grid-template-columns:1fr 1px 1fr;gap:18px;align-items:center}.vline{height:52px;background:var(--line)}
 .fineprint{text-align:center;font-size:11px;color:#9a9287;margin-top:2rem;line-height:1.7}
-.stButton>button{border-radius:14px;min-height:48px;font-weight:700;border:1px solid var(--ink);transition:.15s}.stButton>button[kind="primary"]{background:var(--ink);color:white}.stButton>button:hover{transform:translateY(-1px);border-color:var(--ink)}
+.stButton>button{border-radius:14px;min-height:48px;font-weight:700;border:1px solid var(--ink);transition:.15s;background:#fffdf9;color:var(--ink)}
+.stButton>button p,.stButton>button span{color:inherit!important}
+.stButton>button[kind="primary"],.stButton>button[data-testid="stBaseButton-primary"]{background:var(--ink)!important;border-color:var(--ink)!important;color:#fff!important}
+.stButton>button[kind="primary"] p,.stButton>button[kind="primary"] span,.stButton>button[data-testid="stBaseButton-primary"] p,.stButton>button[data-testid="stBaseButton-primary"] span{color:#fff!important}
+.stButton>button:hover{transform:translateY(-1px);border-color:var(--ink)}
+.stButton>button:disabled,.stButton>button:disabled p,.stButton>button:disabled span{color:#a39b90!important;background:#e8e2d8!important;border-color:#d7cfc3!important}
 [data-testid="stFileUploader"]{background:rgba(255,253,249,.8);border:1.5px dashed #bdb3a5;border-radius:20px;padding:14px}[data-testid="stFileUploaderDropzone"]{background:transparent}
 [data-testid="stProgressBar"]>div>div{background:var(--green)}
 @media(max-width:520px){.block-container{padding-top:1.3rem}.brand{margin-bottom:2rem}.steps{gap:7px}.step{padding:13px 9px}.step span{font-size:12px}}
@@ -187,7 +205,12 @@ elif page == "upload":
 
 elif page == "review":
     items = st.session_state.items
-    st.markdown(f'<div class="eyebrow">第 2 步 · 看建议</div><div class="section-title">AI 看了 {len(items)} 件物品</div><div class="section-copy">这只是一个起点。你可以按自己的真实感受，修改每一件的处理方式。</div>', unsafe_allow_html=True)
+    st.markdown('<div class="eyebrow">第 2 步 · 看建议</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-title">AI 看了 {len(items)} 件物品</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-copy">这只是一个起点。你可以按自己的真实感受，修改每一件的处理方式。</div>',
+        unsafe_allow_html=True,
+    )
     for index, item in enumerate(items):
         label, css, task = ACTION_META[item["suggestion"]]
         safe_name = html.escape(item["name"])
