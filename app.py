@@ -54,28 +54,28 @@ def init_state() -> None:
 
     # Streamlit Cloud may keep browser session state across a redeploy. Normalize
     # stale values left by an earlier version so deep pages cannot crash.
-    if not isinstance(st.session_state.items, list):
-        st.session_state.items = []
-    if not isinstance(st.session_state.photos, list):
-        st.session_state.photos = []
-    if not isinstance(st.session_state.done, dict):
-        st.session_state.done = {}
-    if st.session_state.page not in {"home", "upload", "review", "tasks", "complete"}:
-        st.session_state.page = "home"
-    if st.session_state.page in {"review", "tasks", "complete"} and not st.session_state.items:
-        st.session_state.page = "home"
+    if not isinstance(st.session_state["items"], list):
+        st.session_state["items"] = []
+    if not isinstance(st.session_state["photos"], list):
+        st.session_state["photos"] = []
+    if not isinstance(st.session_state["done"], dict):
+        st.session_state["done"] = {}
+    if st.session_state["page"] not in {"home", "upload", "review", "tasks", "complete"}:
+        st.session_state["page"] = "home"
+    if st.session_state["page"] in {"review", "tasks", "complete"} and not st.session_state["items"]:
+        st.session_state["page"] = "home"
 
 
 def go(page: str) -> None:
-    st.session_state.page = page
+    st.session_state["page"] = page
     st.rerun()
 
 
 def reset() -> None:
     for key in ("items", "photos", "done"):
         st.session_state[key] = [] if key != "done" else {}
-    st.session_state.demo = False
-    st.session_state.page = "home"
+    st.session_state["demo"] = False
+    st.session_state["page"] = "home"
     st.rerun()
 
 
@@ -104,18 +104,18 @@ def analyze_uploads(files) -> None:
                 "space": suggestion.space,
             }
         )
-    st.session_state.items = items
-    st.session_state.photos = files
-    st.session_state.done = {i: False for i in range(len(items))}
-    st.session_state.demo = False
+    st.session_state["items"] = items
+    st.session_state["photos"] = files
+    st.session_state["done"] = {i: False for i in range(len(items))}
+    st.session_state["demo"] = False
     go("review")
 
 
 def load_demo() -> None:
-    st.session_state.items = [item.copy() for item in DEMO_ITEMS]
-    st.session_state.photos = []
-    st.session_state.done = {i: False for i in range(len(DEMO_ITEMS))}
-    st.session_state.demo = True
+    st.session_state["items"] = [item.copy() for item in DEMO_ITEMS]
+    st.session_state["photos"] = []
+    st.session_state["done"] = {i: False for i in range(len(DEMO_ITEMS))}
+    st.session_state["demo"] = True
     go("review")
 
 
@@ -162,7 +162,7 @@ init_state()
 
 st.markdown('<div class="brand">◌ 同态待办</div>', unsafe_allow_html=True)
 
-page = st.session_state.page
+page = st.session_state["page"]
 
 if page == "home":
     st.markdown('<div class="eyebrow">拍照断舍离 · 家庭闲置整理</div>', unsafe_allow_html=True)
@@ -204,7 +204,7 @@ elif page == "upload":
     st.markdown('<div class="notice">原型说明：当前体验版用示例规则生成建议，正式版将接入视觉模型，并允许你随时修改决定。</div>', unsafe_allow_html=True)
 
 elif page == "review":
-    items = st.session_state.items
+    items = st.session_state["items"]
     st.markdown('<div class="eyebrow">第 2 步 · 看建议</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="section-title">AI 看了 {len(items)} 件物品</div>', unsafe_allow_html=True)
     st.markdown(
@@ -234,23 +234,23 @@ elif page == "review":
     st.markdown('<div class="notice">请特别留意带有回忆、家庭关系或高价值属性的物品。AI 不知道它对你意味着什么。</div>', unsafe_allow_html=True)
 
 elif page == "tasks":
-    items = st.session_state.items
-    done_count = sum(bool(v) for v in st.session_state.done.values())
+    items = st.session_state["items"]
+    done_count = sum(bool(v) for v in st.session_state["done"].values())
     st.markdown(f'<div class="eyebrow">第 3 步 · 去完成</div><div class="section-title">处理清单</div><div class="section-copy">{done_count}/{len(items)} 已完成。做完一件，就把它轻轻划掉。</div>', unsafe_allow_html=True)
     st.progress(done_count / len(items) if items else 0)
     for index, item in enumerate(items):
         _, css, task = ACTION_META[item["suggestion"]]
         checked = st.checkbox(
             f"{item['name']} · {task}",
-            value=st.session_state.done.get(index, False),
+            value=st.session_state["done"].get(index, False),
             key=f"done_{index}",
         )
-        st.session_state.done[index] = checked
-    done_count = sum(bool(v) for v in st.session_state.done.values())
+        st.session_state["done"][index] = checked
+    done_count = sum(bool(v) for v in st.session_state["done"].values())
     if done_count == len(items) and items:
         if st.button("完成本次断舍离", type="primary", use_container_width=True):
             # Uploaded photo objects are deliberately dropped at completion.
-            st.session_state.photos = []
+            st.session_state["photos"] = []
             go("complete")
     else:
         st.info(f"再处理 {len(items) - done_count} 件，就完成这次整理了。")
@@ -258,7 +258,7 @@ elif page == "tasks":
         go("review")
 
 elif page == "complete":
-    items = st.session_state.items
+    items = st.session_state["items"]
     released = sum(item["space"] for item in items if item["suggestion"] != "留下")
     st.markdown('<div class="success-ring">✓</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-title" style="text-align:center">本次断舍离完成</div><div class="section-copy" style="text-align:center">你没有追求一次清空，而是认真处理了每一个决定。</div>', unsafe_allow_html=True)
